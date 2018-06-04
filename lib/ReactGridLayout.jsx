@@ -9,6 +9,7 @@ import {
   childrenEqual,
   cloneLayoutItem,
   compact,
+  cloneLayout,
   getLayoutItem,
   moveElement,
   synchronizeLayoutWithChildren,
@@ -233,6 +234,7 @@ export default class ReactGridLayout extends React.Component<Props, State> {
       this.props.children,
       this.props.cols,
       // Legacy support for verticalCompact: false
+      this.props.maxRows,
       this.compactType()
     ),
     mounted: false,
@@ -282,6 +284,7 @@ export default class ReactGridLayout extends React.Component<Props, State> {
         newLayoutBase,
         nextProps.children,
         nextProps.cols,
+        nextProps.maxRows,
         this.compactType(nextProps)
       );
       const oldLayout = this.state.layout;
@@ -328,7 +331,7 @@ export default class ReactGridLayout extends React.Component<Props, State> {
 
     this.setState({
       oldDragItem: cloneLayoutItem(l),
-      oldLayout: this.state.layout
+      oldLayout: layout
     });
 
     return this.props.onDragStart(layout, l, l, null, e, node);
@@ -345,7 +348,7 @@ export default class ReactGridLayout extends React.Component<Props, State> {
   onDrag(i: string, x: number, y: number, { e, node }: GridDragEvent) {
     const { oldDragItem } = this.state;
     let { layout } = this.state;
-    const { cols } = this.props;
+    const { cols, maxRows } = this.props;
     var l = getLayoutItem(layout, i);
     if (!l) return;
 
@@ -361,6 +364,9 @@ export default class ReactGridLayout extends React.Component<Props, State> {
 
     // Move the element to the dragged location.
     const isUserAction = true;
+
+    const oldLayout = cloneLayout(layout);
+
     layout = moveElement(
       layout,
       l,
@@ -374,8 +380,11 @@ export default class ReactGridLayout extends React.Component<Props, State> {
 
     this.props.onDrag(layout, oldDragItem, l, placeholder, e, node);
 
+    const newLayout = compact(layout, this.compactType(), cols, maxRows);
+    
     this.setState({
-      layout: compact(layout, this.compactType(), cols),
+      layout: layout: newLayout ? newLayout : oldLayout,
+      oldLayout: newLayout,
       activeDrag: placeholder
     });
   }
@@ -391,12 +400,14 @@ export default class ReactGridLayout extends React.Component<Props, State> {
   onDragStop(i: string, x: number, y: number, { e, node }: GridDragEvent) {
     const { oldDragItem } = this.state;
     let { layout } = this.state;
-    const { cols, preventCollision } = this.props;
+    const { cols, maxRows, preventCollision } = this.props;
     const l = getLayoutItem(layout, i);
     if (!l) return;
 
     // Move the element here
     const isUserAction = true;
+    const oldLayout = cloneLayout(layout);
+
     layout = moveElement(
       layout,
       l,
@@ -411,16 +422,17 @@ export default class ReactGridLayout extends React.Component<Props, State> {
     this.props.onDragStop(layout, oldDragItem, l, null, e, node);
 
     // Set state
-    const newLayout = compact(layout, this.compactType(), cols);
+    const newLayout = compact(layout, this.compactType(), cols, maxRows);
     const { oldLayout } = this.state;
     this.setState({
       activeDrag: null,
-      layout: newLayout,
+      layout: newLayout ? newLayout : oldLayout,
       oldDragItem: null,
       oldLayout: null
     });
-
-    this.onLayoutMaybeChanged(newLayout, oldLayout);
+    if (newLayout) {
+      this.onLayoutMaybeChanged(newLayout, oldLayout);
+    }
   }
 
   onLayoutMaybeChanged(newLayout: Layout, oldLayout: ?Layout) {
@@ -445,7 +457,7 @@ export default class ReactGridLayout extends React.Component<Props, State> {
 
   onResize(i: string, w: number, h: number, { e, node }: GridResizeEvent) {
     const { layout, oldResizeItem } = this.state;
-    const { cols, preventCollision } = this.props;
+    const { cols, maxRows, preventCollision } = this.props;
     const l: ?LayoutItem = getLayoutItem(layout, i);
     if (!l) return;
 
@@ -473,49 +485,68 @@ export default class ReactGridLayout extends React.Component<Props, State> {
       }
     }
 
+    const oldLayout = cloneLayout(layout);
+    
     if (!hasCollisions) {
       // Set new width and height.
       l.w = w;
       l.h = h;
     }
 
+    this.props.onResize(layout, oldResizeItem, l, placeholder, e, node);
+    let newLayout = compact(layout, this.compactType(), cols, maxRows);
+
+    const placeholderL = newLayout ? getLayoutItem(newLayout, i) : getLayoutItem(oldLayout, i);
+
+    if (!placeholderL) return;
     // Create placeholder element (display only)
     var placeholder = {
-      w: l.w,
-      h: l.h,
-      x: l.x,
-      y: l.y,
+      w: placeholderL.w,
+      h: placeholderL.h,
+      x: placeholderL.x,
+      y: placeholderL.y,
       static: true,
       i: i
     };
-
-    this.props.onResize(layout, oldResizeItem, l, placeholder, e, node);
-
+    
     // Re-compact the layout and set the drag placeholder.
+    if (newLayout) {
+      for (let i = 0, len = newLayout.length; i < len; i++) {
+        let l = newLayout[i];
+        if (l.h + l.y > maxRows) {
+          newLayout = null;
+           break;
+        }
+      }
+    }
     this.setState({
-      layout: compact(layout, this.compactType(), cols),
+      layout: newLayout ? newLayout : oldLayout,
       activeDrag: placeholder
     });
   }
 
   onResizeStop(i: string, w: number, h: number, { e, node }: GridResizeEvent) {
     const { layout, oldResizeItem } = this.state;
-    const { cols } = this.props;
+    const { cols, maxRows } = this.props;
     var l = getLayoutItem(layout, i);
 
+    const oldLayout = cloneLayout(layout);
+    
     this.props.onResizeStop(layout, oldResizeItem, l, null, e, node);
 
+   
     // Set state
-    const newLayout = compact(layout, this.compactType(), cols);
-    const { oldLayout } = this.state;
+    const newLayout = compact(layout, this.compactType(), cols, maxRows);
     this.setState({
       activeDrag: null,
-      layout: newLayout,
+      layout: newLayout ? newLayout : oldLayout,
       oldResizeItem: null,
       oldLayout: null
     });
-
-    this.onLayoutMaybeChanged(newLayout, oldLayout);
+  
+    if (newLayout) {
+      this.onLayoutMaybeChanged(newLayout, oldLayout);
+    }
   }
 
   /**
