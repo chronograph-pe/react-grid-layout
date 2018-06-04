@@ -383,7 +383,7 @@ export default class ReactGridLayout extends React.Component<Props, State> {
     const newLayout = compact(layout, this.compactType(), cols, maxRows);
     
     this.setState({
-      layout: layout: newLayout ? newLayout : oldLayout,
+      layout: newLayout ? newLayout : oldLayout,
       oldLayout: newLayout,
       activeDrag: placeholder
     });
